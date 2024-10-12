@@ -15,21 +15,26 @@ from .tokens import account_activation_token
 from django.utils.http import urlsafe_base64_decode
 from django.utils.encoding import force_str
 from django.contrib.auth import update_session_auth_hash
+from ecommerceadmin.exceptions.exceptions import UserLoginCredentials, UserPasswordCredentials
 
 #Página de login
 @api_view(['POST'])
 @csrf_exempt
 def login(request):
-
-    #Comprueba que exista un usuario en la base de datos
-    user = get_object_or_404(User, username=request.data['username'])
+    try:
+        #Comprueba que exista un usuario en la base de datos
+        user = get_object_or_404(User, username=request.data['username'])
+        
+        #confirma que exista el password previamente creado en register_user
+        if user.check_password(request.data['password']):
+            raise UserPasswordCredentials
+        token = Token.objects.create(user=user)
+        serializer = UserSerializer(instance=user)
+        return Response({'token': token.key, 'user': serializer.data}, status=status.HTTP_201_CREATED)
     
-    #confirma que exista el password previamente creado en register_user
-    if user.check_password(request.data['password']):
-        return Response({'errors': 'Invalid Password'}, status=status.HTTP_400_BAD_REQUEST)
-    token = Token.objects.create(user=user)
-    serializer = UserSerializer(instance=user)
-    return Response({'token': token.key, 'user': serializer.data}, status=status.HTTP_201_CREATED)
+    except UserLoginCredentials:
+        return Response({'error': 'Contraseña incorrecta'}, status=status.HTTP_400_BAD_REQUEST)
+    
  
  #Página de registro de usuario   
 @api_view(['POST'])
@@ -85,8 +90,8 @@ def password_reset_request(request):
     except User.DoesNotExist:
         return Response({"error": "No se encontró el mail"}, status=status.HTTP_404_NOT_FOUND)
     
-    token = account_activation_token.make_token(user)  # Genera el token
-    uid = urlsafe_base64_encode(force_bytes(user.pk))  # ID en base64
+    token = account_activation_token.make_token(user)
+    uid = urlsafe_base64_encode(force_bytes(user.pk))
     
     # Renderiza el mensaje del correo
     subject = "Restablecimiento de Contraseña"
@@ -100,9 +105,9 @@ def password_reset_request(request):
     )
     send_mail(
         "Restablecimiento de Contraseña",
-        message,  # Mensaje con UID y Token sin URL
+        message,
         "arielstarsoft@gmail.com",
-        [user.email],  # El destinatario
+        [user.email],
     )
     
     return Response({"message": "Se ha enviado un correo para restablecer la contraseña"}, status=status.HTTP_200_OK)
